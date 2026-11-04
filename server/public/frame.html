@@ -1,0 +1,261 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Ycamera · 视频抽帧</title>
+<style>
+  :root{--bg:#0d0f12;--card:#171a1f;--line:#262b33;--fg:#e9edf2;--dim:#8b95a5;--acc:#3ea6ff;--ok:#28c76f}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.5 -apple-system,"PingFang SC","Microsoft YaHei",sans-serif;padding-bottom:90px}
+  header{position:sticky;top:0;z-index:10;background:rgba(13,15,18,.94);backdrop-filter:blur(12px);border-bottom:1px solid var(--line);padding:12px 16px;display:flex;align-items:center;gap:10px}
+  header b{font-size:16px}
+  header a{margin-left:auto;color:var(--acc);font-size:13px;text-decoration:none}
+  .wrap{padding:14px 16px}
+  .drop{border:2px dashed var(--line);border-radius:14px;padding:28px 16px;text-align:center;color:var(--dim);font-size:14px}
+  .drop.on{border-color:var(--acc);color:var(--fg)}
+  video{width:100%;border-radius:12px;background:#000;display:block;margin-top:12px}
+  .row{display:flex;gap:10px;flex-wrap:wrap;margin-top:12px;align-items:center}
+  input[type=range]{flex:1;min-width:180px;accent-color:var(--acc)}
+  input[type=number],input[type=text],input[type=password]{background:var(--card);border:1px solid var(--line);color:var(--fg);border-radius:9px;padding:9px 11px;font-size:14px;width:110px}
+  button{background:var(--card);border:1px solid var(--line);color:var(--fg);border-radius:10px;padding:10px 14px;font-size:14px;font-weight:600}
+  button.primary{background:var(--acc);border-color:var(--acc);color:#07131f}
+  button:disabled{opacity:.4}
+  .t{color:var(--dim);font-size:13px;font-variant-numeric:tabular-nums}
+  .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:10px;margin-top:14px}
+  .shot{position:relative;border-radius:10px;overflow:hidden;background:#111}
+  .shot img{width:100%;display:block}
+  .shot .bar{position:absolute;left:0;right:0;bottom:0;padding:6px;background:linear-gradient(#0000,#000c);display:flex;gap:6px;font-size:11px;color:#dfe6ee;align-items:center}
+  .shot .bar button{padding:4px 8px;font-size:11px;margin-left:auto}
+  footer{position:fixed;left:0;right:0;bottom:0;background:rgba(13,15,18,.96);backdrop-filter:blur(12px);border-top:1px solid var(--line);padding:10px 16px calc(10px + env(safe-area-inset-bottom));display:flex;gap:10px;align-items:center}
+  .msg{font-size:13px;color:#ff9f43;min-height:18px}
+  .login{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}
+</style>
+</head>
+<body>
+<header>
+  <b>视频抽帧</b>
+  <a href="/">← 回上传页</a>
+</header>
+
+<div class="wrap">
+  <div class="drop" id="drop">
+    把视频拖进来,或 <label for="pick" style="color:var(--acc);text-decoration:underline;cursor:pointer">选择文件</label>
+    <input type="file" id="pick" accept="video/*" multiple style="display:none">
+  </div>
+
+  <video id="v" controls playsinline style="display:none"></video>
+
+  <div class="row" id="ctrl" style="display:none">
+    <input type="range" id="seek" min="0" max="100" step="0.001" value="0">
+    <span class="t" id="tinfo">0.000s</span>
+  </div>
+
+  <div class="row" id="ctrl2" style="display:none">
+    <button class="primary" id="grab">抓这一帧</button>
+    <button id="grabMax">抓原分辨率</button>
+    <span class="t">批量:</span>
+    <span class="t">每</span><input type="number" id="step" value="2" min="0.1" step="0.1" style="width:80px"><span class="t">秒</span>
+    <button id="batch">开始抽</button>
+    <span class="t" id="bstat"></span>
+  </div>
+
+  <div class="msg" id="msg"></div>
+
+  <div class="row" id="loginRow" style="display:none">
+    <input type="text" id="dev" placeholder="设备名" style="width:150px">
+    <input type="password" id="code" placeholder="团队口令" style="width:130px">
+    <button id="btnLogin">登录后可直接上传</button>
+    <span class="t" id="who"></span>
+  </div>
+
+  <div class="grid" id="grid"></div>
+</div>
+
+<footer>
+  <span class="t" id="cnt">抽出的帧会出现在下面</span>
+  <span style="flex:1"></span>
+  <button id="dlAll">全部下载</button>
+  <button class="primary" id="upAll" disabled>全部上传</button>
+</footer>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const v = $('v');
+const shots = [];
+let token = localStorage.getItem('yc_token') || '';
+let currentFile = null;
+
+if (token) { $('who').textContent = '已登录:' + (localStorage.getItem('yc_name') || ''); }
+
+function msg(s) { $('msg').textContent = s || ''; }
+
+// ---- 载入视频 ----
+function loadFile(f) {
+  if (!f) return;
+  currentFile = f;
+  v.src = URL.createObjectURL(f);
+  v.style.display = 'block';
+  $('ctrl').style.display = 'flex';
+  $('ctrl2').style.display = 'flex';
+  $('loginRow').style.display = 'flex';
+  shots.length = 0;
+  $('grid').innerHTML = '';
+  updateCnt();
+  msg('');
+}
+$('pick').addEventListener('change', (e) => loadFile(e.target.files[0]));
+
+const drop = $('drop');
+['dragenter', 'dragover'].forEach((ev) => drop.addEventListener(ev, (e) => { e.preventDefault(); drop.classList.add('on'); }));
+['dragleave', 'drop'].forEach((ev) => drop.addEventListener(ev, (e) => { e.preventDefault(); drop.classList.remove('on'); }));
+drop.addEventListener('drop', (e) => { loadFile(e.dataTransfer.files[0]); });
+
+v.addEventListener('loadedmetadata', () => {
+  $('seek').max = v.duration;
+  msg(`${currentFile.name} · ${v.videoWidth}×${v.videoHeight} · ${fmtTime(v.duration)}`);
+});
+
+function fmtTime(t) {
+  t = t || 0;
+  const m = Math.floor(t / 60), s = (t % 60).toFixed(3).padStart(6, '0');
+  return `${m}:${s}`;
+}
+v.addEventListener('timeupdate', () => {
+  $('seek').value = v.currentTime;
+  $('tinfo').textContent = fmtTime(v.currentTime);
+});
+$('seek').addEventListener('input', () => { v.currentTime = parseFloat($('seek').value); });
+
+// ---- 抓帧 ----
+function seekTo(t) {
+  return new Promise((res) => {
+    const on = () => { v.removeEventListener('seeked', on); setTimeout(res, 40); };
+    v.addEventListener('seeked', on);
+    v.currentTime = Math.min(t, Math.max(0, v.duration - 0.05));
+  });
+}
+
+function drawFrame(maxW) {
+  const w0 = v.videoWidth, h0 = v.videoHeight;
+  const scale = maxW ? Math.min(1, maxW / Math.max(w0, h0)) : 1;
+  const c = document.createElement('canvas');
+  c.width = Math.round(w0 * scale);
+  c.height = Math.round(h0 * scale);
+  const ctx = c.getContext('2d');
+  ctx.drawImage(v, 0, 0, c.width, c.height);
+  return new Promise((res) => c.toBlob(res, 'image/jpeg', 0.95));
+}
+
+async function grabOne(maxW) {
+  const t = v.currentTime;
+  const blob = await drawFrame(maxW);
+  addShot(blob, t);
+}
+
+$('grab').onclick = () => grabOne(1920);
+$('grabMax').onclick = () => grabOne(0);
+
+$('batch').onclick = async () => {
+  const step = Math.max(0.1, parseFloat($('step').value) || 2);
+  const total = Math.floor(v.duration / step) + 1;
+  if (total > 300) { msg('间隔太小,会抽 ' + total + ' 张,改成先抽前 300 张'); }
+  const n = Math.min(total, 300);
+  $('batch').disabled = true;
+  for (let i = 0; i < n; i++) {
+    const t = i * step;
+    if (t > v.duration) break;
+    $('bstat').textContent = `${i + 1}/${n}`;
+    await seekTo(t);
+    const blob = await drawFrame(1920);
+    addShot(blob, t, true);
+  }
+  $('bstat').textContent = '';
+  $('batch').disabled = false;
+};
+
+function addShot(blob, t, quiet) {
+  const url = URL.createObjectURL(blob);
+  const name = `frame_${String(t.toFixed(2)).replace('.', '_')}s.jpg`;
+  const item = { blob, name, t, url, up: false };
+  shots.push(item);
+
+  const el = document.createElement('div');
+  el.className = 'shot';
+  el.innerHTML = `<img src="${url}"><div class="bar"><span>${fmtTime(t)}</span><button>下载</button></div>`;
+  el.querySelector('button').onclick = () => download(item);
+  $('grid').prepend(el);
+  item.el = el;
+  updateCnt();
+  if (!quiet) msg(`已抓取 ${fmtTime(t)}`);
+}
+
+function download(item) {
+  const a = document.createElement('a');
+  a.href = item.url; a.download = item.name; a.click();
+}
+
+$('dlAll').onclick = () => { for (const s of shots) download(s); };
+
+function updateCnt() {
+  $('cnt').textContent = shots.length ? `已抽 ${shots.length} 帧` : '抽出的帧会出现在下面';
+  $('upAll').disabled = shots.length === 0 || !token;
+}
+
+// ---- 登录 & 上传 ----
+$('btnLogin').onclick = async () => {
+  try {
+    const r = await fetch('/api/login', {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ mode: 'shooter', name: $('dev').value.trim(), code: $('code').value.trim() }),
+    }).then(async (x) => { const j = await x.json(); if (!x.ok) throw new Error(j.error); return j; });
+    token = r.token;
+    localStorage.setItem('yc_token', token);
+    localStorage.setItem('yc_name', r.name);
+    $('who').textContent = '已登录:' + r.name;
+    msg('登录成功,现在可以直接把帧传进素材库');
+    updateCnt();
+  } catch (e) { msg(e.message); }
+};
+
+$('upAll').onclick = async () => {
+  const todo = shots.filter((s) => !s.up);
+  if (!todo.length || !token) return;
+  $('upAll').disabled = true;
+  let ok = 0;
+  for (const s of todo) {
+    const fd = new FormData();
+    fd.append('file', s.blob, s.name);
+    const thumb = await shrink(s.blob);
+    fd.append('thumb', thumb, 'thumb.jpg');
+    fd.append('meta', JSON.stringify({ width: 0, height: 0, takenAt: new Date().toISOString() }));
+    try {
+      const r = await fetch('/api/upload', { method: 'POST', headers: { 'x-token': token }, body: fd });
+      if (!r.ok) throw new Error((await r.json()).error || r.status);
+      s.up = true; ok++;
+      s.el.querySelector('.bar').insertAdjacentHTML('beforeend', '<span style="color:#28c76f">✓ 已上传</span>');
+    } catch (e) {
+      s.el.querySelector('.bar').insertAdjacentHTML('beforeend', `<span style="color:#ff5b5b">${e.message}</span>`);
+    }
+  }
+  msg(`上传完成:${ok}/${todo.length}`);
+  $('upAll').disabled = false;
+};
+
+function shrink(blob) {
+  return new Promise((res) => {
+    const img = new Image();
+    img.onload = () => {
+      const s = Math.min(1, 512 / Math.max(img.width, img.height));
+      const c = document.createElement('canvas');
+      c.width = Math.round(img.width * s);
+      c.height = Math.round(img.height * s);
+      c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
+      c.toBlob(res, 'image/jpeg', 0.8);
+    };
+    img.src = URL.createObjectURL(blob);
+  });
+}
+</script>
+</body>
+</html>

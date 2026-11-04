@@ -84,6 +84,29 @@ app.post('/api/login', (req, res) => {
   res.json({ token, role: 'shooter', name: who });
 });
 
+// ---------------- 磁盘保护 ----------------
+const MIN_FREE_BYTES = (process.env.MIN_FREE_MB ? parseInt(process.env.MIN_FREE_MB, 10) : 800) * 1024 * 1024;
+
+function diskInfo() {
+  try {
+    const s = fs.statfsSync(DIRS.files);
+    return { free: s.bavail * s.bsize, total: s.blocks * s.bsize };
+  } catch (e) {
+    return { free: null, total: null };
+  }
+}
+
+app.get('/api/health', (req, res) => {
+  const d = diskInfo();
+  res.json({
+    ok: true,
+    items: db.items.length,
+    freeBytes: d.free,
+    totalBytes: d.total,
+    minFreeBytes: MIN_FREE_BYTES,
+  });
+});
+
 // ---------------- 上传 ----------------
 const upload = multer({
   dest: DIRS.tmp,
@@ -102,6 +125,15 @@ app.post('/api/upload', auth('shooter'), upload.fields([{ name: 'file', maxCount
   const f = req.files && req.files.file && req.files.file[0];
   if (!f) return res.status(400).json({ error: '缺少文件' });
   const thumb = req.files.thumb && req.files.thumb[0];
+
+  const d = diskInfo();
+  if (d.free !== null && d.free - f.size < MIN_FREE_BYTES) {
+    fs.unlink(f.path, () => {});
+    if (thumb) fs.unlink(thumb.path, () => {});
+    return res.status(507).json({
+      error: `服务器空间不足(剩余 ${(d.free / 1073741824).toFixed(1)} GB),请联系管理员清理或扩容`,
+    });
+  }
 
   let meta = {};
   try { meta = JSON.parse(req.body.meta || '{}'); } catch (e) {}

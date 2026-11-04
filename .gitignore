@@ -1,0 +1,10 @@
+﻿# macOS
+.DS_Store
+# 构建中间产物
+out/
+apktool_out/
+apktool.jar
+*.unsigned.apk
+*.aligned.apk
+*.idsig
+*.keystore

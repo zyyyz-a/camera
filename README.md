@@ -1,10 +1,10 @@
-# 飓风相机(本机版)
+# Ycamera
 
 Android 相机 App:**Blackmagic Camera 官方内核 + 去品牌改造 + 15 支 Leica/Fujifilm LUT**。
 装完就是一台能拍、能套 LUT、不连任何云的本机相机。
 
 ```
-apk/飓风相机-本机版.apk        # 直接装
+apk/Ycamera.apk        # 直接装
 luts/                          # 15 支 .cube(已内置,也可单独导入)
 scripts/                       # LUT 生成、注入、去品牌脚本
 docs/逆向分析报告.md            # 原始样本的逆向记录
@@ -14,10 +14,10 @@ docs/逆向分析报告.md            # 原始样本的逆向记录
 
 ```bash
 adb uninstall com.blackmagicdesign.android.blackmagiccam   # 签名不同,先卸载
-adb install -r apk/飓风相机-本机版.apk
+adb install -r apk/Ycamera.apk
 ```
 
-装完桌面叫「飓风相机」,设置里是:
+装完桌面叫「Ycamera」,设置里是:
 
 ```
 录制 / 摄影机 / 监视 / 直播 / 媒体 / 功能按键 / LUT / 预设 / 配件
@@ -30,12 +30,12 @@ adb install -r apk/飓风相机-本机版.apk
 
 | 位置 | 原文案 | 现在 |
 |---|---|---|
-| 应用名 | 影视飓风相机(第三方改的) | 飓风相机 |
+| 应用名 | 飓风相机(第三方改的) | Ycamera |
 | 设置分类 | Blackmagic Cloud | 云同步 |
 | 登录入口 | Log in to Blackmagic Cloud | 登录云同步 |
 | 关于 | 详情请访问网址:blackmagicdesign.com | 本机版 · 无云端服务 |
-| 权限提示 | Allow Blackmagic Camera to… | 允许 飓风相机… |
-| 重置项 | Reset Camera and Cloud Settings | 重置飓风相机设置 |
+| 权限提示 | Allow Blackmagic Camera to… | 允许 Ycamera… |
+| 重置项 | Reset Camera and Cloud Settings | 重置Ycamera设置 |
 
 字符串资源层 `blackmagic` 命中数:**58 → 0**。
 

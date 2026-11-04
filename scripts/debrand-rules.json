@@ -1,0 +1,21 @@
+[
+ { "from": "Log in to Blackmagic Cloud", "to": "登录云同步" },
+ { "from": "Sign into Blackmagic Cloud", "to": "登录云同步" },
+ { "from": "Cannot connect to Blackmagic Cloud", "to": "云同步未启用" },
+ { "from": "Blackmagic Cloud Storage is full", "to": "云空间已满" },
+ { "from": "Blackmagic Cloud Environment", "to": "云环境" },
+ { "from": "Blackmagic Cloud project", "to": "云项目" },
+ { "from": "Blackmagic Cloud", "to": "云同步" },
+ { "from": "Blackmagic Camera Folder Permission", "to": "相机 文件夹权限" },
+ { "from": "Blackmagic Camera needs access", "to": "相机 需要访问" },
+ { "from": "Allow Blackmagic Camera to", "to": "允许 相机" },
+ { "from": "restart Blackmagic Camera", "to": "重启 相机" },
+ { "from": "Blackmagic Camera", "to": "飓风相机" },
+ { "from": "Blackmagic Cameras", "to": "可连接的相机" },
+ { "from": "Blackmagic Cam", "to": "飓风相机" },
+ { "from": "Blackmagic LUTs", "to": "内置 LUT" },
+ { "from": "Blackmagic Log HDR", "to": "Log HDR" },
+ { "from": "Blackmagicdesign.com", "to": "local" },
+ { "from": "Blackmagic design", "to": "飓风相机" },
+ { "from": "Blackmagic", "to": "" }
+]

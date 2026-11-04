@@ -222,7 +222,7 @@ async function openScreen(dev) {
   } catch (e) { $('scPh').textContent = '下发失败:' + e.message; return; }
   tickScreen(dev, 0);
   if (scTimer) clearInterval(scTimer);
-  scTimer = setInterval(() => tickScreen(dev, 99), 2000);
+  scTimer = setInterval(() => tickScreen(dev, 99), 1000);
 }
 
 async function tickScreen(dev, n) {
@@ -242,7 +242,7 @@ async function tickScreen(dev, n) {
 }
 
 function timerRetry(dev, n) {
-  setTimeout(() => tickScreen(dev, n), 2000);
+  setTimeout(() => tickScreen(dev, n), 1000);
 }
 
 $('scClose').onclick = () => {

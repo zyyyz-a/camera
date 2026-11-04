@@ -55,6 +55,8 @@
 
 <header>
   <b>素材库</b>
+  <a href="/devices" style="color:var(--acc);font-size:13px;text-decoration:none">机位监控 →</a>
+  <a href="/" style="color:var(--dim);font-size:13px;text-decoration:none">上传</a>
   <span class="stat" id="stat"></span>
   <span class="grow"></span>
   <button id="btnAll">全选本页</button>
@@ -79,6 +81,7 @@
   <div class="stat" id="sum">未选择</div>
   <span class="grow"></span>
   <button id="btnSelNone">取消选择</button>
+  <button id="btnDel" disabled style="color:#ff6b6b;border-color:#ff6b6b">删除选中</button>
   <button class="primary" id="btnZip2" disabled>打包下载</button>
 </footer>
 
@@ -87,6 +90,7 @@
     <button id="viewClose">关闭</button>
     <span class="name" id="viewName"></span>
     <span class="grow"></span>
+    <button id="viewDel" style="color:#ff6b6b;border-color:#ff6b6b">删除</button>
     <button id="viewDl">下载原文件</button>
   </div>
   <div class="body" id="viewBody"></div>
@@ -193,10 +197,41 @@ function updateSum() {
   const bytes = items.filter((i) => selected.has(i.id)).reduce((a, i) => a + i.size, 0);
   $('sum').innerHTML = n ? `已选 <b>${n}</b> 个 · ${fmt(bytes)}` : `未选择 · 共 ${total} 个`;
   $('btnZip').disabled = $('btnZip2').disabled = n === 0;
+  $('btnDel').disabled = n === 0;
+  $('btnZip2').style.display = n ? '' : 'none';
+  $('btnDel').style.display = n ? '' : 'none';
 }
+
+// ---- 删除 ----
+let viewingId = null;
+
+async function delIds(ids) {
+  if (!ids.length) return;
+  if (!confirm(`确定删除 ${ids.length} 个?\n服务器上的文件会一并删掉,不可恢复。`)) return;
+  let ok = 0, fail = 0;
+  for (const id of ids) {
+    try {
+      const r = await fetch('/api/items/' + id, { method: 'DELETE', headers: { 'x-token': token } });
+      if (r.ok) ok++; else fail++;
+    } catch (e) { fail++; }
+  }
+  for (const id of ids) selected.delete(id);
+  $('view').classList.remove('on');
+  $('viewBody').innerHTML = '';
+  await load(1);
+  try {
+    const s = await api('/api/stats');
+    $('stat').innerHTML = `${s.total} 个文件 · <b>${fmt(s.bytes)}</b>`;
+  } catch (e) {}
+  alert(`已删除 ${ok} 个` + (fail ? `,失败 ${fail} 个` : ''));
+}
+
+$('btnDel').onclick = () => delIds([...selected]);
+$('viewDel').onclick = () => { if (viewingId) delIds([viewingId]); };
 
 function show(it) {
   $('view').classList.add('on');
+  viewingId = it.id;
   const tag = it.thumbOnly ? '(仅预览图,原文件未上传)' : '';
   $('viewName').textContent = `${it.name} · ${it.device} · ${fmt(it.size)} ${tag}`;
   const url = it.thumbOnly ? `/f/${it.id}/thumb?token=${token}` : `/f/${it.id}/orig?token=${token}`;

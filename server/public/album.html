@@ -1,0 +1,188 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Ycamera · 手机相册</title>
+<style>
+  :root{--bg:#0d0f12;--card:#171a1f;--line:#262b33;--fg:#e9edf2;--dim:#8b95a5;--acc:#3ea6ff}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.5 -apple-system,"PingFang SC","Microsoft YaHei",sans-serif}
+  header{position:sticky;top:0;z-index:10;background:rgba(13,15,18,.95);backdrop-filter:blur(12px);border-bottom:1px solid var(--line);padding:12px 18px;display:flex;gap:12px;align-items:center;flex-wrap:wrap}
+  header b{font-size:16px}
+  button{background:var(--card);border:1px solid var(--line);color:var(--fg);border-radius:9px;padding:8px 13px;font-size:13px;font-weight:600;cursor:pointer}
+  button.primary{background:var(--acc);border-color:var(--acc);color:#07131f}
+  button:disabled{opacity:.45}
+  select{background:var(--card);color:var(--fg);border:1px solid var(--line);border-radius:9px;padding:8px 10px;font-size:13px}
+  .wrap{padding:16px 18px 60px}
+  .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(148px,1fr));gap:10px}
+  .cell{background:var(--card);border:1px solid var(--line);border-radius:10px;overflow:hidden;cursor:pointer;position:relative;aspect-ratio:1;display:flex;align-items:center;justify-content:center}
+  .cell img{width:100%;height:100%;object-fit:cover;display:block}
+  .cell .ph{color:var(--dim);font-size:11px;text-align:center;padding:8px;line-height:1.4;word-break:break-all}
+  .cell .nm{position:absolute;left:0;right:0;bottom:0;padding:14px 6px 5px;font-size:10px;color:#dfe6ee;background:linear-gradient(#0000,#000c);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .cell.loading{opacity:.55}
+  .tip{color:var(--dim);font-size:13px;margin:10px 0}
+  #view{position:fixed;inset:0;background:#000d;z-index:60;display:none;flex-direction:column}
+  #view.on{display:flex}
+  #view .top{display:flex;gap:10px;padding:10px 14px;align-items:center;background:#0d0f12cc}
+  #view .body{flex:1;display:flex;align-items:center;justify-content:center;overflow:auto}
+  #view img{max-width:100%;max-height:100%}
+  #login{position:fixed;inset:0;background:var(--bg);display:flex;align-items:center;justify-content:center;z-index:70;padding:24px}
+  #login .box{width:100%;max-width:340px}
+  input[type=password]{width:100%;padding:13px 14px;margin-bottom:10px;font-size:15px;background:var(--card);border:1px solid var(--line);color:var(--fg);border-radius:10px}
+  .hidden{display:none!important}
+</style>
+</head>
+<body>
+
+<div id="login">
+  <div class="box">
+    <h2 style="margin:0 0 4px;font-size:20px">手机相册</h2>
+    <p style="color:var(--dim);font-size:13px;margin:0 0 18px">管理员口令</p>
+    <input id="pw" type="password" placeholder="管理员口令">
+    <div style="color:#ff9f43;font-size:13px;min-height:18px" id="msg"></div>
+    <button class="primary" id="btnLogin" style="width:100%;padding:13px">登录</button>
+  </div>
+</div>
+
+<header>
+  <b>手机相册</b>
+  <select id="dev"></select>
+  <button class="primary" id="btnLoad">读取相册</button>
+  <button id="btnRefresh">刷新</button>
+  <span style="color:var(--dim);font-size:13px" id="stat"></span>
+  <span style="flex:1"></span>
+  <a href="/devices" style="color:var(--acc);font-size:13px;text-decoration:none">机位监控 →</a>
+</header>
+
+<div class="wrap">
+  <div class="tip" id="tip">
+    点「读取相册」让手机上报文件列表(只有文件名和时间,几 KB),再逐张取预览图。
+    预览图只在服务器内存里过一手,不存盘、不进素材库,看完就散。
+  </div>
+  <div class="grid" id="grid"></div>
+</div>
+
+<div id="view">
+  <div class="top">
+    <button id="viewClose">关闭</button>
+    <span style="color:var(--dim);font-size:13px" id="viewName"></span>
+  </div>
+  <div class="body"><img id="viewImg" alt=""></div>
+</div>
+
+<script>
+let token = localStorage.getItem('yc_admin_token') || '';
+const $ = (id) => document.getElementById(id);
+const api = (p, o = {}) => {
+  o.headers = Object.assign({}, o.headers, { 'x-token': token });
+  return fetch(p, o).then(async (r) => {
+    const t = await r.text();
+    let j; try { j = JSON.parse(t); } catch (e) { j = {}; }
+    if (!r.ok) throw new Error(j.error || r.status);
+    return j;
+  });
+};
+
+async function login() {
+  try {
+    const r = await fetch('/api/login', {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ mode: 'admin', code: $('pw').value }),
+    }).then(async (x) => { const j = await x.json(); if (!x.ok) throw new Error(j.error); return j; });
+    token = r.token;
+    localStorage.setItem('yc_admin_token', token);
+    $('login').classList.add('hidden');
+    boot();
+  } catch (e) { $('msg').textContent = e.message; }
+}
+$('btnLogin').onclick = login;
+$('pw').addEventListener('keydown', (e) => { if (e.key === 'Enter') login(); });
+if (token) { $('login').classList.add('hidden'); boot(); }
+
+async function boot() {
+  try {
+    const r = await api('/api/devices');
+    $('dev').innerHTML = r.devices.map((d) =>
+      `<option value="${escapeAttr(d.name)}">${escapeAttr(d.name)}${d.online ? '' : ' (离线)'}</option>`).join('');
+    if (!r.devices.length) $('stat').textContent = '没有设备在线';
+  } catch (e) { localStorage.removeItem('yc_admin_token'); location.reload(); }
+}
+
+const escapeAttr = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+
+let cache = [];
+$('btnLoad').onclick = async () => {
+  const dev = $('dev').value;
+  if (!dev) return;
+  $('stat').textContent = '已请求,等手机响应(约 5 秒)…';
+  try {
+    await api('/api/devices/' + encodeURIComponent(dev) + '/tasks', {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ type: 'album', params: { limit: 120 } }),
+    });
+  } catch (e) { $('stat').textContent = '下发失败:' + e.message; return; }
+  pollAlbum(dev, 0);
+};
+
+async function pollAlbum(dev, n) {
+  if (n > 12) { $('stat').textContent = '手机没响应,确认设备在线'; return; }
+  try {
+    const r = await api('/api/album/' + encodeURIComponent(dev));
+    if (r.items && r.items.length) {
+      cache = r.items;
+      render();
+      $('stat').textContent = `共 ${r.items.length} 个文件(仅元数据)`;
+      return;
+    }
+  } catch (e) {}
+  setTimeout(() => pollAlbum(dev, n + 1), 2500);
+}
+
+function render() {
+  const g = $('grid');
+  g.innerHTML = '';
+  cache.forEach((it, i) => {
+    const el = document.createElement('div');
+    el.className = 'cell';
+    el.innerHTML = `<div class="ph">${it.kind === 'video' ? '▶ ' : ''}${Math.round(it.size / 1024)}KB<br>点击加载预览</div>
+                    <div class="nm">${escapeAttr(it.name)}</div>`;
+    el.onclick = () => loadThumb(it, el);
+    g.appendChild(el);
+  });
+}
+
+async function loadThumb(it, el) {
+  const dev = $('dev').value;
+  const rid = 'r' + Math.random().toString(36).slice(2, 10);
+  el.classList.add('loading');
+  try {
+    await api('/api/devices/' + encodeURIComponent(dev) + '/tasks', {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ type: 'thumb', params: { mediaId: it.id, rid, width: 900 } }),
+    });
+  } catch (e) { el.classList.remove('loading'); return; }
+  pollThumb(rid, el, it, 0);
+}
+
+async function pollThumb(rid, el, it, n) {
+  if (n > 10) { el.classList.remove('loading'); el.querySelector('.ph').textContent = '取图超时'; return; }
+  try {
+    const r = await fetch('/api/relay/' + rid, { headers: { 'x-token': token } });
+    if (r.ok) {
+      const blob = await r.blob();
+      const url = URL.createObjectURL(blob);
+      el.innerHTML = `<img src="${url}"><div class="nm">${escapeAttr(it.name)}</div>`;
+      el.onclick = () => { $('view').classList.add('on'); $('viewImg').src = url; $('viewName').textContent = it.name; };
+      el.classList.remove('loading');
+      return;
+    }
+  } catch (e) {}
+  setTimeout(() => pollThumb(rid, el, it, n + 1), 1500);
+}
+
+$('btnRefresh').onclick = () => boot();
+$('viewClose').onclick = () => { $('view').classList.remove('on'); $('viewImg').src = ''; };
+</script>
+</body>
+</html>

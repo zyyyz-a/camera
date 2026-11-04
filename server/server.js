@@ -32,10 +32,12 @@ const DIRS = {
 for (const d of [DIRS.files, DIRS.thumbs, DIRS.tmp]) fs.mkdirSync(d, { recursive: true });
 
 // ---------------- 极简持久化 ----------------
-let db = { items: [], sessions: {} };
+let db = { items: [], sessions: {}, devices: {}, tasks: [] };
 if (fs.existsSync(DIRS.db)) {
   try { db = JSON.parse(fs.readFileSync(DIRS.db, 'utf8')); } catch (e) { console.error('db 读取失败', e.message); }
 }
+db.devices = db.devices || {};
+db.tasks = db.tasks || [];
 let saveTimer = null;
 function save() {
   if (saveTimer) return;
@@ -154,6 +156,7 @@ app.post('/api/upload', auth('shooter'), upload.fields([{ name: 'file', maxCount
       device: req.session.name, takenAt: meta0.takenAt || null,
       uploadedAt: new Date().toISOString(), day: (meta0.takenAt || new Date().toISOString()).slice(0, 10),
       thumb: thumbName, path: null, thumbOnly: true, devicePath: meta0.devicePath || '',
+      temp: !!meta0.temp, source: meta0.source || 'sync',
     };
     db.items.push(it);
     save();
@@ -231,12 +234,14 @@ app.post('/api/upload', auth('shooter'), upload.fields([{ name: 'file', maxCount
 
 // ---------------- 列表 ----------------
 app.get('/api/items', auth(), (req, res) => {
-  const { day, device, kind, q, page = 1, size = 60 } = req.query;
+  const { day, device, kind, q, page = 1, size = 60, temp } = req.query;
   let list = db.items.slice();
   if (req.session.role !== 'admin') list = list.filter((i) => i.device === req.session.name);
   if (day) list = list.filter((i) => i.day === day);
   if (device) list = list.filter((i) => i.device === device);
   if (kind) list = list.filter((i) => i.kind === kind);
+  if (temp === '1') list = list.filter((i) => i.temp);
+  if (temp === '0') list = list.filter((i) => !i.temp);
   if (q) {
     const s = String(q).toLowerCase();
     list = list.filter((i) => i.name.toLowerCase().includes(s));
@@ -325,6 +330,156 @@ app.delete('/api/items/:id', auth('admin'), (req, res) => {
 });
 
 app.get('/api/whoami', auth(), (req, res) => res.json(req.session));
+
+// ============================================================
+//  设备监控 + 按需拉取(手机端 Agent 轮询)
+// ============================================================
+const ONLINE_MS = 90 * 1000;
+
+function deviceView(name) {
+  const d = db.devices[name];
+  if (!d) return null;
+  const online = Date.now() - (d.lastSeen || 0) < ONLINE_MS;
+  return { ...d, name, online };
+}
+
+// 手机心跳:上报电量/定位/相册数量,顺带取任务
+app.post('/api/device/heartbeat', auth('shooter'), (req, res) => {
+  const b = req.body || {};
+  const name = req.session.name;
+  const prev = db.devices[name] || {};
+  db.devices[name] = {
+    ...prev,
+    battery: b.battery != null ? b.battery : prev.battery,
+    charging: b.charging != null ? b.charging : prev.charging,
+    lat: b.lat != null ? b.lat : prev.lat,
+    lng: b.lng != null ? b.lng : prev.lng,
+    accuracy: b.accuracy != null ? b.accuracy : prev.accuracy,
+    photoCount: b.photoCount != null ? b.photoCount : prev.photoCount,
+    videoCount: b.videoCount != null ? b.videoCount : prev.videoCount,
+    freeBytes: b.freeBytes != null ? b.freeBytes : prev.freeBytes,
+    model: b.model || prev.model,
+    android: b.android || prev.android,
+    appVersion: b.appVersion || prev.appVersion,
+    lastSeen: Date.now(),
+    ip: req.headers['x-forwarded-for'] || req.socket.remoteAddress,
+  };
+  save();
+  // 取走即标记 running,避免手机在长任务期间重复领取同一个任务
+  const now = Date.now();
+  for (const t of db.tasks) {
+    if (t.status === 'running' && now - (t.takenAt || 0) > 5 * 60 * 1000) t.status = 'pending'; // 超时回收
+  }
+  const tasks = db.tasks.filter((t) => t.device === name && t.status === 'pending');
+  for (const t of tasks) { t.status = 'running'; t.takenAt = now; }
+  if (tasks.length) save();
+  res.json({ ok: true, tasks, serverTime: Date.now() });
+});
+
+// 手机执行完任务回报
+app.post('/api/device/task/:id', auth('shooter'), (req, res) => {
+  const t = db.tasks.find((x) => x.id === req.params.id);
+  if (!t) return res.status(404).json({ error: '任务不存在' });
+  if (t.device !== req.session.name) return res.status(403).json({ error: '不是你的任务' });
+  const b = req.body || {};
+  t.status = b.ok ? 'done' : 'failed';
+  t.finishedAt = Date.now();
+  t.result = b.message || '';
+  t.uploaded = b.uploaded || 0;
+  save();
+  res.json({ ok: true });
+});
+
+// 管理端:设备列表
+app.get('/api/devices', auth('admin'), (req, res) => {
+  const list = Object.keys(db.devices).map(deviceView).filter(Boolean);
+  list.sort((a, b) => (b.lastSeen || 0) - (a.lastSeen || 0));
+  const now = Date.now();
+  const pending = db.tasks.filter((t) => t.status === 'pending' && now - t.createdAt < 10 * 60 * 1000);
+  res.json({ devices: list, pendingTasks: pending });
+});
+
+// 管理端:给某台设备下任务
+app.post('/api/devices/:name/tasks', auth('admin'), (req, res) => {
+  const { name } = req.params;
+  const { type, params } = req.body || {};
+  if (!type) return res.status(400).json({ error: '缺少任务类型' });
+  const t = {
+    id: 't' + Date.now().toString(36) + crypto.randomBytes(2).toString('hex'),
+    device: name, type, params: params || {},
+    status: 'pending', createdAt: Date.now(),
+  };
+  db.tasks.push(t);
+  // 只保留最近 200 条任务记录
+  if (db.tasks.length > 200) db.tasks = db.tasks.slice(-200);
+  save();
+  res.json({ ok: true, task: t });
+});
+
+// 管理端:某台设备的任务记录
+app.get('/api/devices/:name/tasks', auth('admin'), (req, res) => {
+  const list = db.tasks.filter((t) => t.device === req.params.name).slice(-30).reverse();
+  res.json({ tasks: list });
+});
+
+// 管理端:清空临时预览(thumb-only 且标记 temp)
+app.delete('/api/temp', auth('admin'), (req, res) => {
+  const keep = [];
+  let removed = 0;
+  for (const it of db.items) {
+    if (it.temp) {
+      if (it.thumb) { try { fs.unlinkSync(path.join(DIRS.thumbs, it.thumb)); } catch (e) {} }
+      if (it.path) { try { fs.unlinkSync(path.join(DIRS.files, it.path)); } catch (e) {} }
+      removed++;
+    } else keep.push(it);
+  }
+  db.items = keep;
+  save();
+  res.json({ ok: true, removed });
+});
+
+// ============================================================
+//  相册在线预览:图片只在内存里中转,不落盘、不进素材库
+// ============================================================
+const memUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 8 * 1024 * 1024, files: 1 } });
+const relayMap = new Map();   // rid -> { buf, ts }
+const albumMap = new Map();   // device -> { items, ts }
+
+function gcRelay() {
+  const now = Date.now();
+  for (const [k, v] of relayMap) if (now - v.ts > 120000) relayMap.delete(k);
+  for (const [k, v] of albumMap) if (now - v.ts > 30 * 60 * 1000) albumMap.delete(k);
+}
+setInterval(gcRelay, 30000).unref();
+
+// 手机上传一张预览图到内存
+app.post('/api/relay/:rid', auth('shooter'), memUpload.single('img'), (req, res) => {
+  if (!req.file || !req.file.buffer) return res.status(400).json({ error: '没有图片' });
+  relayMap.set(req.params.rid, { buf: req.file.buffer, ts: Date.now() });
+  res.json({ ok: true, size: req.file.buffer.length });
+});
+
+// 浏览器取走(用完 2 分钟后自动过期)
+app.get('/api/relay/:rid', auth(), (req, res) => {
+  const e = relayMap.get(req.params.rid);
+  if (!e) return res.status(404).json({ error: 'not ready' });
+  res.setHeader('Content-Type', 'image/jpeg');
+  res.setHeader('Cache-Control', 'no-store');
+  res.send(e.buf);
+});
+
+// 手机上报相册文件列表(只有元数据)
+app.post('/api/album/:device', auth('shooter'), express.json({ limit: '4mb' }), (req, res) => {
+  const items = (req.body && req.body.items) || [];
+  albumMap.set(req.params.device, { items, ts: Date.now() });
+  res.json({ ok: true, count: items.length });
+});
+
+// 管理员取相册列表
+app.get('/api/album/:device', auth('admin'), (req, res) => {
+  const e = albumMap.get(req.params.device);
+  res.json(e ? { items: e.items, ts: e.ts } : { items: [], ts: 0 });
+});
 
 app.listen(PORT, '0.0.0.0', () => {
   console.log(`Ycamera Hub 运行在 http://0.0.0.0:${PORT}`);

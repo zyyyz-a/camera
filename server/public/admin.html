@@ -159,9 +159,10 @@ function fillSelects(r) {
 function cell(it) {
   const el = document.createElement('div');
   el.className = 'cell' + (selected.has(it.id) ? ' sel' : '');
+  const kindLabel = it.thumbOnly ? '仅预览' : (it.kind === 'video' ? '视频' : '照片');
   el.innerHTML = `
     <img loading="lazy" src="/f/${it.id}/thumb?token=${token}" alt="">
-    <div class="badge">${it.kind === 'video' ? '视频' : '照片'}</div>
+    <div class="badge">${kindLabel}</div>
     <div class="chk">✓</div>
     <div class="meta">
       <div class="n">${esc(it.name)}</div>
@@ -196,12 +197,14 @@ function updateSum() {
 
 function show(it) {
   $('view').classList.add('on');
-  $('viewName').textContent = `${it.name} · ${it.device} · ${fmt(it.size)}`;
-  const url = `/f/${it.id}/orig?token=${token}`;
-  $('viewBody').innerHTML = it.kind === 'video'
+  const tag = it.thumbOnly ? '(仅预览图,原文件未上传)' : '';
+  $('viewName').textContent = `${it.name} · ${it.device} · ${fmt(it.size)} ${tag}`;
+  const url = it.thumbOnly ? `/f/${it.id}/thumb?token=${token}` : `/f/${it.id}/orig?token=${token}`;
+  $('viewBody').innerHTML = (it.kind === 'video' && !it.thumbOnly)
     ? `<video src="${url}" controls autoplay playsinline style="max-height:88vh"></video>`
     : `<img src="${url}" style="max-height:88vh">`;
-  $('viewDl').onclick = () => { location.href = url + '&dl=1'; };
+  $('viewDl').onclick = () => { if (!it.thumbOnly) location.href = url + '&dl=1'; };
+  $('viewDl').style.display = it.thumbOnly ? 'none' : '';
 }
 $('viewClose').onclick = () => { $('view').classList.remove('on'); $('viewBody').innerHTML = ''; };
 

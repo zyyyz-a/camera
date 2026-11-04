@@ -1,0 +1,239 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Ycamera · 相册同步</title>
+<style>
+  :root{--bg:#0d0f12;--card:#171a1f;--line:#262b33;--fg:#e9edf2;--dim:#8b95a5;--acc:#3ea6ff;--ok:#28c76f}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.5 -apple-system,"PingFang SC","Microsoft YaHei",sans-serif;padding-bottom:90px}
+  header{position:sticky;top:0;z-index:10;background:rgba(13,15,18,.94);backdrop-filter:blur(12px);border-bottom:1px solid var(--line);padding:12px 16px;display:flex;gap:10px;align-items:center}
+  header b{font-size:16px}
+  header a{margin-left:auto;color:var(--acc);font-size:13px;text-decoration:none}
+  .wrap{padding:14px 16px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:14px;margin-bottom:12px}
+  .row{display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-top:10px}
+  button{background:var(--card);border:1px solid var(--line);color:var(--fg);border-radius:10px;padding:11px 15px;font-size:14px;font-weight:600}
+  button.primary{background:var(--acc);border-color:var(--acc);color:#07131f}
+  button:disabled{opacity:.4}
+  input[type=text],input[type=password]{background:#0f1216;border:1px solid var(--line);color:var(--fg);border-radius:9px;padding:11px 12px;font-size:14px;width:100%}
+  .t{color:var(--dim);font-size:13px}
+  .bar{height:6px;background:#0f1216;border-radius:4px;overflow:hidden;margin-top:10px}
+  .bar i{display:block;height:100%;width:0;background:var(--acc);transition:width .2s}
+  .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(96px,1fr));gap:6px;margin-top:12px}
+  .cell{aspect-ratio:1;border-radius:8px;overflow:hidden;background:#111;position:relative}
+  .cell img{width:100%;height:100%;object-fit:cover}
+  .cell .s{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-size:11px;background:#0008;color:#fff}
+  .cell.done .s{background:#28c76fcc}
+  .cell.err .s{background:#ff5b5bcc}
+  label.chk{display:flex;gap:8px;align-items:center;font-size:14px}
+  .msg{font-size:13px;color:#ff9f43;min-height:18px;margin-top:8px}
+  footer{position:fixed;left:0;right:0;bottom:0;background:rgba(13,15,18,.96);backdrop-filter:blur(12px);border-top:1px solid var(--line);padding:12px 16px calc(12px + env(safe-area-inset-bottom));display:flex;gap:10px;align-items:center}
+</style>
+</head>
+<body>
+<header>
+  <b>相册同步</b>
+  <a href="/">← 上传</a>
+</header>
+
+<div class="wrap">
+  <div class="card">
+    <div class="t" style="margin-bottom:8px">选手机里的相册文件夹,页面会把每张照片/视频做成预览图传到服务器。<br>
+      电脑打开 <b>/admin</b> 就能看到你的整个相册。</div>
+    <input type="text" id="dev" placeholder="设备名,例如 iPhone-小张">
+    <div class="row" style="margin-top:8px">
+      <input type="password" id="code" placeholder="团队口令" style="flex:1;min-width:140px">
+      <button id="btnLogin" style="flex:0 0 auto">登录</button>
+      <span class="t" id="who"></span>
+    </div>
+    <div class="row">
+      <label class="btn" for="dirPick" style="flex:1;text-align:center;padding:11px;border-radius:10px;border:1px solid var(--line);background:var(--card)">选相册文件夹</label>
+      <input type="file" id="dirPick" webkitdirectory directory multiple style="display:none">
+      <label class="btn" for="filePick" style="flex:1;text-align:center;padding:11px;border-radius:10px;border:1px solid var(--line);background:var(--card)">选多个文件</label>
+      <input type="file" id="filePick" accept="image/*,video/*" multiple style="display:none">
+    </div>
+    <div class="row">
+      <label class="chk"><input type="checkbox" id="withOrig"> 同时上传原文件(占服务器空间)</label>
+    </div>
+    <div class="row">
+      <button class="primary" id="btnSync" style="flex:1" disabled>开始同步</button>
+      <button id="btnStop" disabled>停止</button>
+    </div>
+    <div class="bar"><i id="prog"></i></div>
+    <div class="t" id="stat" style="margin-top:8px">未开始</div>
+    <div class="msg" id="msg"></div>
+  </div>
+
+  <div class="grid" id="grid"></div>
+</div>
+
+<footer>
+  <span class="t" id="cnt">0 个待同步</span>
+  <span style="flex:1"></span>
+  <a href="/admin" style="color:var(--acc);text-decoration:none;font-size:14px">去电脑端看 →</a>
+</footer>
+
+<script>
+const $ = (id) => document.getElementById(id);
+let token = localStorage.getItem('yc_token') || '';
+let name = localStorage.getItem('yc_name') || '';
+let queue = [];       // {file, el, state}
+let running = false;
+let stopFlag = false;
+
+if (token && name) { $('who').textContent = '已登录:' + name; }
+
+function msg(s) { $('msg').textContent = s || ''; }
+
+$('btnLogin').onclick = async () => {
+  try {
+    const body = { mode: 'shooter', name: $('dev').value.trim(), code: $('code').value.trim() };
+    const r = await fetch('/api/login', {
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body),
+    }).then(async (x) => { const j = await x.json(); if (!x.ok) throw new Error(j.error); return j; });
+    token = r.token; name = r.name;
+    localStorage.setItem('yc_token', token);
+    localStorage.setItem('yc_name', name);
+    $('who').textContent = '已登录:' + name;
+    msg('登录成功');
+    updateBtn();
+  } catch (e) { msg(e.message); }
+};
+
+function isMedia(f) {
+  return /^image\//.test(f.type) || /^video\//.test(f.type) ||
+    /\.(jpe?g|png|heic|heif|webp|dng|cr2|arw|mov|mp4|mkv)$/i.test(f.name);
+}
+
+function addFiles(list) {
+  const arr = [...list].filter(isMedia);
+  for (const f of arr) {
+    const rel = f.webkitRelativePath || f.name;
+    if (queue.some((q) => q.path === rel && q.file.size === f.size)) continue;
+    const el = document.createElement('div');
+    el.className = 'cell';
+    el.innerHTML = '<img alt=""><div class="s"></div>';
+    $('grid').appendChild(el);
+    queue.push({ file: f, path: rel, el, state: 'wait' });
+  }
+  $('cnt').textContent = queue.length + ' 个待同步';
+  updateBtn();
+  msg(`已选 ${queue.length} 个文件(只同步预览图的话很快)`);
+}
+
+$('dirPick').addEventListener('change', (e) => addFiles(e.target.files));
+$('filePick').addEventListener('change', (e) => addFiles(e.target.files));
+
+function updateBtn() {
+  $('btnSync').disabled = !token || !queue.length || running;
+  $('btnStop').disabled = !running;
+}
+
+// —— 生成缩略图 ——
+function thumbFromImage(file) {
+  return new Promise((resolve) => {
+    const img = new Image();
+    const url = URL.createObjectURL(file);
+    img.onload = () => {
+      const s = Math.min(1, 640 / Math.max(img.width, img.height));
+      const c = document.createElement('canvas');
+      c.width = Math.max(1, Math.round(img.width * s));
+      c.height = Math.max(1, Math.round(img.height * s));
+      c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
+      c.toBlob((b) => { URL.revokeObjectURL(url); resolve({ blob: b, w: img.width, h: img.height, duration: 0 }); }, 'image/jpeg', 0.8);
+    };
+    img.onerror = () => { URL.revokeObjectURL(url); resolve(null); };
+    img.src = url;
+  });
+}
+
+function thumbFromVideo(file) {
+  return new Promise((resolve) => {
+    const v = document.createElement('video');
+    v.preload = 'metadata'; v.muted = true; v.playsInline = true;
+    const url = URL.createObjectURL(file);
+    v.src = url;
+    let done = false;
+    const fin = (blob) => {
+      if (done) return; done = true;
+      resolve(blob ? { blob, w: v.videoWidth, h: v.videoHeight, duration: v.duration || 0 } : null);
+      URL.revokeObjectURL(url);
+    };
+    v.onloadedmetadata = () => { v.currentTime = Math.min(0.3, (v.duration || 1) * 0.1); };
+    v.onseeked = () => {
+      try {
+        const s = Math.min(1, 640 / Math.max(v.videoWidth, v.videoHeight));
+        const c = document.createElement('canvas');
+        c.width = Math.round(v.videoWidth * s);
+        c.height = Math.round(v.videoHeight * s);
+        c.getContext('2d').drawImage(v, 0, 0, c.width, c.height);
+        c.toBlob((b) => fin(b), 'image/jpeg', 0.8);
+      } catch (e) { fin(null); }
+    };
+    v.onerror = () => fin(null);
+    setTimeout(() => fin(null), 8000);
+  });
+}
+
+// —— 上传 ——
+async function syncOne(item) {
+  const file = item.file;
+  const isVideo = /^video\//.test(file.type);
+  const t = isVideo ? await thumbFromVideo(file) : await thumbFromImage(file);
+  if (!t) { item.state = 'err'; item.el.classList.add('err'); item.el.querySelector('.s').textContent = '跳过'; return; }
+  item.el.querySelector('img').src = URL.createObjectURL(t.blob);
+
+  const fd = new FormData();
+  fd.append('thumb', t.blob, 'thumb.jpg');
+  const meta = {
+    name: file.name, ext: '.' + (file.name.split('.').pop() || 'jpg'),
+    size: file.size, mime: file.type, kind: isVideo ? 'video' : 'image',
+    width: t.w, height: t.h, duration: t.duration,
+    takenAt: new Date(file.lastModified || Date.now()).toISOString(),
+    devicePath: item.path,
+  };
+  fd.append('meta', JSON.stringify(meta));
+
+  if ($('withOrig').checked) {
+    fd.append('file', file, file.name);
+  }
+
+  const r = await fetch('/api/upload', { method: 'POST', headers: { 'x-token': token }, body: fd });
+  if (!r.ok) {
+    const j = await r.json().catch(() => ({}));
+    throw new Error(j.error || ('HTTP ' + r.status));
+  }
+  item.state = 'done';
+  item.el.classList.add('done');
+  item.el.querySelector('.s').textContent = '✓';
+}
+
+$('btnSync').onclick = async () => {
+  const todo = queue.filter((q) => q.state === 'wait' || q.state === 'err');
+  if (!todo.length) { msg('没有待同步的文件'); return; }
+  running = true; stopFlag = false; updateBtn();
+  let done = 0, dup = 0, fail = 0;
+  const total = todo.length;
+  $('stat').textContent = `0 / ${total}`;
+
+  const worker = async () => {
+    while (todo.length && !stopFlag) {
+      const it = todo.shift();
+      it.el.querySelector('.s').textContent = '…';
+      try { await syncOne(it); done++; }
+      catch (e) { fail++; it.state = 'err'; it.el.classList.add('err'); it.el.querySelector('.s').textContent = '失败'; msg(e.message); }
+      $('prog').style.width = (((done + dup + fail) / total) * 100).toFixed(1) + '%';
+      $('stat').textContent = `${done + dup + fail} / ${total}(成功 ${done},失败 ${fail})`;
+    }
+  };
+  await Promise.all([worker(), worker()]);
+  running = false; updateBtn();
+  msg(stopFlag ? '已停止' : `同步完成:成功 ${done} 个${fail ? ',失败 ' + fail + ' 个' : ''}`);
+};
+
+$('btnStop').onclick = () => { stopFlag = true; msg('正在停止…'); };
+</script>
+</body>
+</html>

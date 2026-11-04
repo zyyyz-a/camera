@@ -123,8 +123,44 @@ function extOf(name, mime) {
 
 app.post('/api/upload', auth('shooter'), upload.fields([{ name: 'file', maxCount: 1 }, { name: 'thumb', maxCount: 1 }]), (req, res) => {
   const f = req.files && req.files.file && req.files.file[0];
-  if (!f) return res.status(400).json({ error: '缺少文件' });
-  const thumb = req.files.thumb && req.files.thumb[0];
+  const thumb0 = req.files && req.files.thumb && req.files.thumb[0];
+  if (!f && !thumb0) return res.status(400).json({ error: '缺少文件' });
+
+  let meta0 = {};
+  try { meta0 = JSON.parse(req.body.meta || '{}'); } catch (e) {}
+
+  // —— 只传缩略图(手机相册同步模式):不占原图空间,电脑端能看能筛 ——
+  if (!f && thumb0) {
+    const d0 = diskInfo();
+    if (d0.free !== null && d0.free - thumb0.size < MIN_FREE_BYTES) {
+      fs.unlink(thumb0.path, () => {});
+      return res.status(507).json({ error: `服务器空间不足(剩余 ${(d0.free / 1073741824).toFixed(1)} GB)` });
+    }
+    // 同一设备同一路径只记一次
+    if (meta0.devicePath) {
+      const exist = db.items.find((i) => i.device === req.session.name && i.devicePath === meta0.devicePath);
+      if (exist) {
+        fs.unlink(thumb0.path, () => {});
+        return res.json({ ok: true, dup: true, item: exist });
+      }
+    }
+    const rid = 'r' + Date.now().toString(36) + crypto.randomBytes(3).toString('hex');
+    const thumbName = rid + '.jpg';
+    fs.renameSync(thumb0.path, path.join(DIRS.thumbs, thumbName));
+    const it = {
+      id: rid, sha: null, name: meta0.name || (rid + '.jpg'), ext: meta0.ext || '.jpg',
+      size: meta0.size || 0, mime: meta0.mime || '', kind: meta0.kind || 'image',
+      duration: meta0.duration || 0, width: meta0.width || 0, height: meta0.height || 0,
+      device: req.session.name, takenAt: meta0.takenAt || null,
+      uploadedAt: new Date().toISOString(), day: (meta0.takenAt || new Date().toISOString()).slice(0, 10),
+      thumb: thumbName, path: null, thumbOnly: true, devicePath: meta0.devicePath || '',
+    };
+    db.items.push(it);
+    save();
+    return res.json({ ok: true, item: it });
+  }
+
+  const thumb = thumb0;
 
   const d = diskInfo();
   if (d.free !== null && d.free - f.size < MIN_FREE_BYTES) {
@@ -234,6 +270,10 @@ function findItem(id) { return db.items.find((i) => i.id === id); }
 app.get('/f/:id/orig', auth(), (req, res) => {
   const it = findItem(req.params.id);
   if (!it) return res.status(404).end();
+  if (!it.path) {   // 相册同步模式:只有缩略图
+    if (!it.thumb) return res.status(404).end();
+    return res.sendFile(path.join(DIRS.thumbs, it.thumb));
+  }
   const abs = path.join(DIRS.files, it.path);
   res.setHeader('Content-Type', it.mime || 'application/octet-stream');
   res.setHeader('Content-Disposition', `inline; filename*=UTF-8''${encodeURIComponent(it.name)}`);

@@ -59,12 +59,26 @@
   <button id="btnRefresh">刷新</button>
   <button class="danger" id="btnClearTemp">清空临时预览</button>
   <a href="/apk/ycamera-agent.apk" style="color:var(--acc);font-size:13px;text-decoration:none;border:1px solid var(--acc);padding:6px 10px;border-radius:8px">下载采集端 APK</a>
+  <a href="/album" style="color:var(--acc);font-size:13px;text-decoration:none">手机相册</a>
   <a href="/admin" style="color:var(--acc);font-size:13px;text-decoration:none">素材库 →</a>
 </header>
 
 <div class="wrap">
   <div class="grid" id="grid"></div>
   <div class="empty" id="empty">还没有设备上线。手机装好采集端 App 并登录后会自动出现在这里。</div>
+</div>
+
+<div id="screen" style="position:fixed;inset:0;background:#000e;z-index:80;display:none;flex-direction:column">
+  <div style="display:flex;gap:10px;padding:10px 14px;align-items:center;background:#0d0f12dd">
+    <b id="scTitle" style="font-size:14px"></b>
+    <span style="color:#8b95a5;font-size:12px" id="scStat"></span>
+    <span style="flex:1"></span>
+    <button id="scClose">关闭</button>
+  </div>
+  <div style="flex:1;display:flex;align-items:center;justify-content:center;overflow:auto">
+    <img id="scImg" style="max-width:100%;max-height:100%;display:none">
+    <div id="scPh" style="color:#8b95a5;font-size:14px">正在请求手机开始共享…</div>
+  </div>
 </div>
 
 <script>
@@ -155,9 +169,13 @@ function card(d) {
       <input type="number" data-lim value="30" min="1" max="500">
       <span style="color:var(--dim);font-size:13px;align-self:center">张预览</span>
       <button class="primary" data-pull>下发</button>
+      <button data-screen>看屏幕</button>
+      <button data-album>看相册</button>
       <button data-tasks>记录</button>
     </div>
     <div class="tasks" data-list style="display:none"></div>`;
+  el.querySelector('[data-screen]').onclick = () => openScreen(d.name);
+  el.querySelector('[data-album]').onclick = () => { location.href = '/album?device=' + encodeURIComponent(d.name); };
   el.querySelector('[data-pull]').onclick = async () => {
     const limit = parseInt(el.querySelector('[data-lim]').value, 10) || 30;
     try {
@@ -186,6 +204,51 @@ async function loadTasks(name, el) {
       : '<div style="color:var(--dim)">暂无任务</div>';
   } catch (e) { box.textContent = e.message; }
 }
+
+// ---- 看屏幕 ----
+let scTimer = null;
+async function openScreen(dev) {
+  $('screen').style.display = 'flex';
+  $('scTitle').textContent = dev + ' · 屏幕';
+  $('scStat').textContent = '请求中…';
+  $('scImg').style.display = 'none';
+  $('scPh').style.display = '';
+  $('scPh').textContent = '正在请求手机开始共享…';
+  try {
+    await api('/api/devices/' + encodeURIComponent(dev) + '/tasks', {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ type: 'screen', params: { seconds: 180 } }),
+    });
+  } catch (e) { $('scPh').textContent = '下发失败:' + e.message; return; }
+  tickScreen(dev, 0);
+  if (scTimer) clearInterval(scTimer);
+  scTimer = setInterval(() => tickScreen(dev, 99), 2000);
+}
+
+async function tickScreen(dev, n) {
+  if ($('screen').style.display === 'none') return;
+  try {
+    const r = await fetch('/api/relay/s_' + encodeURIComponent(dev) + '?t=' + Date.now(), { headers: { 'x-token': token } });
+    if (r.ok) {
+      const url = URL.createObjectURL(await r.blob());
+      $('scImg').src = url;
+      $('scImg').style.display = '';
+      $('scPh').style.display = 'none';
+      $('scStat').textContent = new Date().toLocaleTimeString();
+    } else if (n < 5) {
+      timerRetry(dev, n + 1);
+    }
+  } catch (e) {}
+}
+
+function timerRetry(dev, n) {
+  setTimeout(() => tickScreen(dev, n), 2000);
+}
+
+$('scClose').onclick = () => {
+  $('screen').style.display = 'none';
+  if (scTimer) { clearInterval(scTimer); scTimer = null; }
+};
 
 $('btnRefresh').onclick = refresh;
 $('btnClearTemp').onclick = async () => {

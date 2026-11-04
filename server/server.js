@@ -459,6 +459,15 @@ app.post('/api/relay/:rid', auth('shooter'), memUpload.single('img'), (req, res)
   res.json({ ok: true, size: req.file.buffer.length });
 });
 
+// 查询某前缀下已就绪的内存缩略图 key
+app.get('/api/relay/ready', auth(), (req, res) => {
+  const prefix = String(req.query.prefix || '');
+  const ids = [];
+  for (const k of relayMap.keys()) {
+    if (k.startsWith(prefix)) ids.push(k.slice(prefix.length));
+  }
+  res.json({ ids, count: ids.length });
+});
 // 浏览器取走(用完 2 分钟后自动过期)
 app.get('/api/relay/:rid', auth(), (req, res) => {
   const e = relayMap.get(req.params.rid);
@@ -467,6 +476,7 @@ app.get('/api/relay/:rid', auth(), (req, res) => {
   res.setHeader('Cache-Control', 'no-store');
   res.send(e.buf);
 });
+
 
 // 手机上报相册文件列表(只有元数据)
 app.post('/api/album/:device', auth('shooter'), express.json({ limit: '4mb' }), (req, res) => {

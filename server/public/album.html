@@ -106,6 +106,11 @@ async function boot() {
     $('dev').innerHTML = r.devices.map((d) =>
       `<option value="${escapeAttr(d.name)}">${escapeAttr(d.name)}${d.online ? '' : ' (离线)'}</option>`).join('');
     if (!r.devices.length) $('stat').textContent = '没有设备在线';
+    const q = new URLSearchParams(location.search).get('device');
+    if (q) {
+      const opt = [...$('dev').options].find((o) => o.value === q);
+      if (opt) { $('dev').value = q; setTimeout(() => $('btnLoad').click(), 300); }
+    }
   } catch (e) { localStorage.removeItem('yc_admin_token'); location.reload(); }
 }
 
@@ -132,11 +137,41 @@ async function pollAlbum(dev, n) {
     if (r.items && r.items.length) {
       cache = r.items;
       render();
-      $('stat').textContent = `共 ${r.items.length} 个文件(仅元数据)`;
+      $('stat').textContent = `共 ${r.items.length} 个,正在自动加载预览…`;
+      autoFill(dev, 0);
       return;
     }
   } catch (e) {}
   setTimeout(() => pollAlbum(dev, n + 1), 2500);
+}
+
+let fillTimer = null;
+async function autoFill(dev, n) {
+  try {
+    const r = await api('/api/relay/ready?prefix=' + encodeURIComponent('a_' + dev + '_'));
+    let got = 0;
+    for (const mid of r.ids) {
+      const el = document.querySelector('.cell[data-mid="' + mid + '"]');
+      if (el && !el.dataset.got) {
+        el.dataset.got = '1';
+        const img = new Image();
+        img.src = '/api/relay/a_' + encodeURIComponent(dev) + '_' + mid + '?token=' + token;
+        img.onload = () => {
+          el.innerHTML = '';
+          el.appendChild(img);
+          el.classList.remove('loading');
+        };
+        got++;
+      }
+    }
+    const readyCount = document.querySelectorAll('.cell[data-got]').length;
+    $('stat').textContent = `已加载 ${readyCount} / ${cache.length} 张`;
+    if (readyCount < cache.length && n < 200) {
+      setTimeout(() => autoFill(dev, n + 1), 2000);
+    }
+  } catch (e) {
+    if (n < 200) setTimeout(() => autoFill(dev, n + 1), 3000);
+  }
 }
 
 function render() {
@@ -145,9 +180,15 @@ function render() {
   cache.forEach((it, i) => {
     const el = document.createElement('div');
     el.className = 'cell';
-    el.innerHTML = `<div class="ph">${it.kind === 'video' ? '▶ ' : ''}${Math.round(it.size / 1024)}KB<br>点击加载预览</div>
+    el.dataset.mid = it.id;
+    el.className = 'cell loading';
+    el.innerHTML = `<div class="ph">${Math.round(it.size / 1024)}KB</div>
                     <div class="nm">${escapeAttr(it.name)}</div>`;
-    el.onclick = () => loadThumb(it, el);
+    el.onclick = () => {
+      const img = el.querySelector('img');
+      if (img) { $('view').classList.add('on'); $('viewImg').src = img.src; $('viewName').textContent = it.name; }
+      else loadThumb(it, el);
+    };
     g.appendChild(el);
   });
 }

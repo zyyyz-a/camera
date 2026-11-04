@@ -1,0 +1,234 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Ycamera · 管理</title>
+<style>
+  :root{--bg:#0d0f12;--card:#171a1f;--line:#262b33;--fg:#e9edf2;--dim:#8b95a5;--acc:#3ea6ff;--ok:#28c76f}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.45 -apple-system,"PingFang SC","Microsoft YaHei",sans-serif}
+  header{position:sticky;top:0;z-index:20;background:rgba(13,15,18,.94);backdrop-filter:blur(12px);border-bottom:1px solid var(--line);padding:10px 16px;display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+  header b{font-size:16px}
+  .stat{color:var(--dim);font-size:13px}
+  .stat b{color:var(--fg)}
+  .grow{margin-left:auto}
+  .filters{display:flex;gap:8px;padding:12px 16px;flex-wrap:wrap;align-items:center;border-bottom:1px solid var(--line);position:sticky;top:53px;background:rgba(13,15,18,.94);backdrop-filter:blur(12px);z-index:15}
+  select,input{background:var(--card);color:var(--fg);border:1px solid var(--line);border-radius:9px;padding:8px 10px;font-size:13px}
+  button{background:var(--card);color:var(--fg);border:1px solid var(--line);border-radius:9px;padding:8px 12px;font-size:13px;font-weight:600}
+  button.primary{background:var(--acc);border-color:var(--acc);color:#07131f}
+  button:disabled{opacity:.4}
+  .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:10px;padding:14px 16px 90px}
+  .cell{position:relative;border-radius:10px;overflow:hidden;background:#111;border:2px solid transparent;cursor:pointer}
+  .cell.sel{border-color:var(--acc)}
+  .cell img{width:100%;aspect-ratio:1;object-fit:cover;display:block;background:#0a0a0a}
+  .cell .meta{position:absolute;left:0;right:0;bottom:0;padding:16px 7px 6px;font-size:11px;color:#dfe6ee;background:linear-gradient(#0000,#000b)}
+  .cell .meta .n{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .cell .chk{position:absolute;right:6px;top:6px;width:22px;height:22px;border-radius:50%;border:2px solid #fff9;background:#0006;display:flex;align-items:center;justify-content:center;font-size:12px;color:#fff}
+  .cell.sel .chk{background:var(--acc);border-color:var(--acc);color:#07131f}
+  .cell .badge{position:absolute;left:6px;top:6px;font-size:10px;background:#000a;padding:2px 6px;border-radius:6px;color:#cfe0f0}
+  footer{position:fixed;left:0;right:0;bottom:0;background:rgba(13,15,18,.96);backdrop-filter:blur(12px);border-top:1px solid var(--line);padding:10px 16px calc(10px + env(safe-area-inset-bottom));display:flex;gap:10px;align-items:center}
+  #view{position:fixed;inset:0;background:#000d;z-index:60;display:none;flex-direction:column}
+  #view.on{display:flex}
+  #view .top{display:flex;gap:10px;padding:10px 14px;align-items:center;background:#0d0f12cc}
+  #view .top .name{font-size:13px;color:var(--dim);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  #view .body{flex:1;display:flex;align-items:center;justify-content:center;overflow:auto}
+  #view img,#view video{max-width:100%;max-height:100%}
+  #login{position:fixed;inset:0;background:var(--bg);display:flex;align-items:center;justify-content:center;z-index:70;padding:24px}
+  #login .box{width:100%;max-width:340px}
+  input[type=password],input[type=text]{width:100%;padding:13px 14px;margin-bottom:10px;font-size:15px}
+  .msg{color:#ff9f43;font-size:13px;min-height:18px;margin-bottom:8px}
+  .hidden{display:none!important}
+</style>
+</head>
+<body>
+
+<div id="login">
+  <div class="box">
+    <h2 style="margin:0 0 4px;font-size:20px">Ycamera 管理</h2>
+    <p style="color:var(--dim);font-size:13px;margin:0 0 18px">管理员口令</p>
+    <input id="pw" type="password" placeholder="管理员口令">
+    <div class="msg" id="msg"></div>
+    <button class="primary" id="btnLogin" style="width:100%;padding:13px">登录</button>
+  </div>
+</div>
+
+<header>
+  <b>素材库</b>
+  <span class="stat" id="stat"></span>
+  <span class="grow"></span>
+  <button id="btnAll">全选本页</button>
+  <button class="primary" id="btnZip" disabled>打包下载</button>
+</header>
+
+<div class="filters">
+  <select id="fDay"><option value="">全部日期</option></select>
+  <select id="fDev"><option value="">全部设备</option></select>
+  <select id="fKind">
+    <option value="">全部类型</option>
+    <option value="image">照片</option>
+    <option value="video">视频</option>
+  </select>
+  <input id="fQ" type="text" placeholder="搜索文件名" style="width:160px">
+  <button id="btnMore">加载更多</button>
+</div>
+
+<div class="grid" id="grid"></div>
+
+<footer>
+  <div class="stat" id="sum">未选择</div>
+  <span class="grow"></span>
+  <button id="btnSelNone">取消选择</button>
+  <button class="primary" id="btnZip2" disabled>打包下载</button>
+</footer>
+
+<div id="view">
+  <div class="top">
+    <button id="viewClose">关闭</button>
+    <span class="name" id="viewName"></span>
+    <span class="grow"></span>
+    <button id="viewDl">下载原文件</button>
+  </div>
+  <div class="body" id="viewBody"></div>
+</div>
+
+<script>
+let token = localStorage.getItem('yc_admin_token') || '';
+let page = 1, total = 0, items = [], selected = new Set();
+const $ = (id) => document.getElementById(id);
+const fmt = (n) => n > 1073741824 ? (n / 1073741824).toFixed(2) + ' GB' : n > 1048576 ? (n / 1048576).toFixed(1) + ' MB' : (n / 1024).toFixed(0) + ' KB';
+const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+
+const api = (p, o = {}) => {
+  o.headers = Object.assign({}, o.headers, { 'x-token': token });
+  return fetch(p, o).then(async (r) => {
+    if (!r.ok) { throw new Error((await r.text()) || ('HTTP ' + r.status)); }
+    return r.json();
+  });
+};
+
+async function login() {
+  const code = $('pw').value;
+  $('msg').textContent = '';
+  try {
+    const r = await fetch('/api/login', {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ mode: 'admin', code }),
+    }).then(async (x) => { const j = await x.json(); if (!x.ok) throw new Error(j.error); return j; });
+    token = r.token; localStorage.setItem('yc_admin_token', token);
+    $('login').classList.add('hidden');
+    boot();
+  } catch (e) { $('msg').textContent = e.message; }
+}
+$('btnLogin').onclick = login;
+$('pw').addEventListener('keydown', (e) => { if (e.key === 'Enter') login(); });
+
+if (token) { $('login').classList.add('hidden'); boot(); }
+
+async function boot() {
+  try {
+    const s = await api('/api/stats');
+    $('stat').innerHTML = `${s.total} 个文件 · <b>${fmt(s.bytes)}</b>`;
+  } catch (e) { localStorage.removeItem('yc_admin_token'); location.reload(); }
+  await load(1);
+}
+
+async function load(p) {
+  const qs = new URLSearchParams({
+    page: p, size: 60,
+    day: $('fDay').value, device: $('fDev').value, kind: $('fKind').value, q: $('fQ').value.trim(),
+  });
+  const r = await api('/api/items?' + qs);
+  total = r.total;
+  if (p === 1) { items = r.items; $('grid').innerHTML = ''; fillSelects(r); }
+  else items = items.concat(r.items);
+
+  for (const it of r.items) $('grid').appendChild(cell(it));
+  page = p;
+  $('btnMore').style.display = (items.length < total) ? '' : 'none';
+  updateSum();
+}
+
+function fillSelects(r) {
+  const day = $('fDay'), dev = $('fDev');
+  const dv = day.value, dd = dev.value;
+  day.innerHTML = '<option value="">全部日期</option>' + r.days.map((d) => `<option ${d === dv ? 'selected' : ''} value="${d}">${d}</option>`).join('');
+  dev.innerHTML = '<option value="">全部设备</option>' + r.devices.map((d) => `<option ${d === dd ? 'selected' : ''} value="${d}">${esc(d)}</option>`).join('');
+}
+
+function cell(it) {
+  const el = document.createElement('div');
+  el.className = 'cell' + (selected.has(it.id) ? ' sel' : '');
+  el.innerHTML = `
+    <img loading="lazy" src="/f/${it.id}/thumb?token=${token}" alt="">
+    <div class="badge">${it.kind === 'video' ? '视频' : '照片'}</div>
+    <div class="chk">✓</div>
+    <div class="meta">
+      <div class="n">${esc(it.name)}</div>
+      <div>${esc(it.device)} · ${fmt(it.size)}</div>
+    </div>`;
+  el.querySelector('.chk').onclick = (e) => { e.stopPropagation(); toggle(it, el); };
+  el.onclick = () => toggle(it, el);
+  el.ondblclick = () => show(it);
+  let tapTimer = null;
+  el.addEventListener('touchend', () => {
+    clearTimeout(tapTimer);
+    tapTimer = setTimeout(() => {}, 0);
+  });
+  // 长按预览
+  el.addEventListener('contextmenu', (e) => { e.preventDefault(); show(it); });
+  el.dataset.id = it.id;
+  return el;
+}
+
+function toggle(it, el) {
+  if (selected.has(it.id)) { selected.delete(it.id); el.classList.remove('sel'); }
+  else { selected.add(it.id); el.classList.add('sel'); }
+  updateSum();
+}
+
+function updateSum() {
+  const n = selected.size;
+  const bytes = items.filter((i) => selected.has(i.id)).reduce((a, i) => a + i.size, 0);
+  $('sum').innerHTML = n ? `已选 <b>${n}</b> 个 · ${fmt(bytes)}` : `未选择 · 共 ${total} 个`;
+  $('btnZip').disabled = $('btnZip2').disabled = n === 0;
+}
+
+function show(it) {
+  $('view').classList.add('on');
+  $('viewName').textContent = `${it.name} · ${it.device} · ${fmt(it.size)}`;
+  const url = `/f/${it.id}/orig?token=${token}`;
+  $('viewBody').innerHTML = it.kind === 'video'
+    ? `<video src="${url}" controls autoplay playsinline style="max-height:88vh"></video>`
+    : `<img src="${url}" style="max-height:88vh">`;
+  $('viewDl').onclick = () => { location.href = url + '&dl=1'; };
+}
+$('viewClose').onclick = () => { $('view').classList.remove('on'); $('viewBody').innerHTML = ''; };
+
+function zipSel() {
+  if (!selected.size) return;
+  location.href = '/api/zip?ids=' + [...selected].join(',') + '&token=' + token;
+}
+$('btnZip').onclick = zipSel;
+$('btnZip2').onclick = zipSel;
+$('btnSelNone').onclick = () => {
+  selected.clear();
+  document.querySelectorAll('.cell.sel').forEach((e) => e.classList.remove('sel'));
+  updateSum();
+};
+$('btnAll').onclick = () => {
+  const cur = items.slice(0, 60 * page);
+  const allSel = cur.every((i) => selected.has(i.id));
+  cur.forEach((i) => {
+    if (allSel) selected.delete(i.id); else selected.add(i.id);
+  });
+  document.querySelectorAll('.cell').forEach((e) => e.classList.toggle('sel', selected.has(e.dataset.id)));
+  updateSum();
+};
+$('btnMore').onclick = () => load(page + 1);
+['fDay', 'fDev', 'fKind'].forEach((id) => $(id).addEventListener('change', () => { selected.clear(); load(1); }));
+let qt = null;
+$('fQ').addEventListener('input', () => { clearTimeout(qt); qt = setTimeout(() => { selected.clear(); load(1); }, 350); });
+</script>
+</body>
+</html>

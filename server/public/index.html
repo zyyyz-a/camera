@@ -1,0 +1,303 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Ycamera · 素材上传</title>
+<style>
+  :root{--bg:#0d0f12;--card:#171a1f;--line:#262b33;--fg:#e9edf2;--dim:#8b95a5;--acc:#3ea6ff;--ok:#28c76f;--warn:#ff9f43}
+  *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+  body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.45 -apple-system,"PingFang SC","Microsoft YaHei",sans-serif;padding-bottom:env(safe-area-inset-bottom)}
+  header{position:sticky;top:0;z-index:10;background:rgba(13,15,18,.92);backdrop-filter:blur(12px);border-bottom:1px solid var(--line);padding:10px 14px;display:flex;align-items:center;gap:10px}
+  header b{font-size:16px;letter-spacing:.5px}
+  header .who{margin-left:auto;color:var(--dim);font-size:12px}
+  .wrap{padding:14px}
+  .pick{display:flex;gap:10px;margin-bottom:14px}
+  .btn{flex:1;display:flex;align-items:center;justify-content:center;gap:8px;padding:14px;border-radius:12px;border:1px solid var(--line);background:var(--card);color:var(--fg);font-size:15px;font-weight:600}
+  .btn.primary{background:var(--acc);border-color:var(--acc);color:#07131f}
+  .btn:disabled{opacity:.45}
+  .bar{display:flex;align-items:center;gap:10px;color:var(--dim);font-size:13px;margin:6px 0 12px}
+  .bar .sp{margin-left:auto}
+  .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(108px,1fr));gap:8px}
+  .cell{position:relative;aspect-ratio:1;border-radius:10px;overflow:hidden;background:#111;border:2px solid transparent}
+  .cell.sel{border-color:var(--acc)}
+  .cell img{width:100%;height:100%;object-fit:cover;display:block}
+  .cell .tag{position:absolute;left:6px;bottom:5px;font-size:11px;background:rgba(0,0,0,.62);padding:1px 6px;border-radius:6px}
+  .cell .chk{position:absolute;right:6px;top:6px;width:22px;height:22px;border-radius:50%;border:2px solid #fff9;background:#0006;display:flex;align-items:center;justify-content:center;font-size:13px;color:#fff}
+  .cell.sel .chk{background:var(--acc);border-color:var(--acc);color:#07131f}
+  .cell .st{position:absolute;left:0;right:0;bottom:0;height:3px;background:#0000}
+  .cell .st i{display:block;height:100%;width:0;background:var(--ok)}
+  .cell.err .st i{background:#ff5b5b}
+  footer{position:fixed;left:0;right:0;bottom:0;background:rgba(13,15,18,.95);backdrop-filter:blur(12px);border-top:1px solid var(--line);padding:10px 14px calc(10px + env(safe-area-inset-bottom));display:flex;gap:10px;align-items:center}
+  footer .info{font-size:13px;color:var(--dim)}
+  footer .info b{color:var(--fg)}
+  #login{position:fixed;inset:0;background:var(--bg);display:flex;align-items:center;justify-content:center;z-index:50;padding:24px}
+  #login .box{width:100%;max-width:340px}
+  #login h2{margin:0 0 4px;font-size:20px}
+  #login p{margin:0 0 18px;color:var(--dim);font-size:13px}
+  input{width:100%;padding:13px 14px;border-radius:10px;border:1px solid var(--line);background:var(--card);color:var(--fg);font-size:15px;margin-bottom:10px}
+  .msg{font-size:13px;color:var(--warn);min-height:18px;margin-bottom:8px}
+  .hidden{display:none!important}
+</style>
+</head>
+<body>
+
+<div id="login">
+  <div class="box">
+    <h2>Ycamera</h2>
+    <p>填设备名和团队口令,照片只上传你选中的那些</p>
+    <input id="inName" placeholder="设备名,例如 iPhone-小张 / A7M4-现场" autocomplete="off">
+    <input id="inCode" placeholder="团队口令" type="password" autocomplete="off">
+    <div class="msg" id="loginMsg"></div>
+    <button class="btn primary" id="btnLogin" style="width:100%">进入</button>
+  </div>
+</div>
+
+<header>
+  <b>素材上传</b>
+  <span class="who" id="who"></span>
+</header>
+
+<div class="wrap">
+  <div class="pick">
+    <label class="btn primary" for="fileImages">选照片/视频</label>
+    <input id="fileImages" type="file" accept="image/*,video/*" multiple class="hidden">
+    <button class="btn" id="btnClear">清空</button>
+  </div>
+
+  <div class="bar">
+    <span id="cnt">还没有选择文件</span>
+    <span class="sp"></span>
+    <button class="btn" id="btnAll" style="flex:0;padding:8px 12px;font-size:13px">全选</button>
+    <button class="btn" id="btnNone" style="flex:0;padding:8px 12px;font-size:13px">取消全选</button>
+  </div>
+
+  <div class="grid" id="grid"></div>
+  <div style="height:80px"></div>
+</div>
+
+<footer>
+  <div class="info" id="sum">已选 <b>0</b> 个 · 0 MB</div>
+  <button class="btn primary" id="btnUp" style="flex:0 0 auto;padding:12px 18px" disabled>上传</button>
+</footer>
+
+<script>
+const api = (p, o = {}) => {
+  o.headers = Object.assign({}, o.headers, token ? { 'x-token': token } : {});
+  return fetch(p, o).then(async (r) => {
+    const t = await r.text();
+    let j; try { j = JSON.parse(t); } catch (e) { j = { error: t }; }
+    if (!r.ok) throw new Error(j.error || ('HTTP ' + r.status));
+    return j;
+  });
+};
+let token = localStorage.getItem('yc_token') || '';
+let me = null;
+const files = [];   // {file, thumb(Blob), url, kind, duration, w, h, selected, el, prog}
+
+const $ = (id) => document.getElementById(id);
+const fmt = (n) => n > 1024 * 1024 ? (n / 1048576).toFixed(1) + ' MB' : (n / 1024).toFixed(0) + ' KB';
+
+// ---------- 登录 ----------
+async function doLogin() {
+  const name = $('inName').value.trim();
+  const code = $('inCode').value.trim();
+  $('loginMsg').textContent = '';
+  try {
+    const r = await fetch('/api/login', {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ mode: 'shooter', name, code }),
+    }).then(async (x) => { const j = await x.json(); if (!x.ok) throw new Error(j.error); return j; });
+    token = r.token; me = r;
+    localStorage.setItem('yc_token', token);
+    localStorage.setItem('yc_name', name);
+    enter();
+  } catch (e) { $('loginMsg').textContent = e.message; }
+}
+$('btnLogin').onclick = doLogin;
+$('inCode').addEventListener('keydown', (e) => { if (e.key === 'Enter') doLogin(); });
+
+function enter() {
+  $('login').classList.add('hidden');
+  $('who').textContent = me ? me.name : (localStorage.getItem('yc_name') || '');
+}
+if (token) {
+  api('/api/whoami').then((r) => { me = r; enter(); }).catch(() => { localStorage.removeItem('yc_token'); token = ''; });
+}
+
+// ---------- 缩略图生成(纯前端,服务端不转码) ----------
+async function makeImageThumb(file) {
+  const bmp = await createImageBitmap(file);
+  const scale = Math.min(1, 512 / Math.max(bmp.width, bmp.height));
+  const w = Math.round(bmp.width * scale), h = Math.round(bmp.height * scale);
+  const c = document.createElement('canvas');
+  c.width = w; c.height = h;
+  c.getContext('2d').drawImage(bmp, 0, 0, w, h);
+  const blob = await new Promise((r) => c.toBlob(r, 'image/jpeg', 0.78));
+  return { blob, w: bmp.width, h: bmp.height };
+}
+
+function makeVideoThumb(file) {
+  return new Promise((resolve) => {
+    const v = document.createElement('video');
+    v.preload = 'metadata'; v.muted = true; v.playsInline = true;
+    v.src = URL.createObjectURL(file);
+    let done = false;
+    const finish = (blob) => {
+      if (done) return; done = true;
+      resolve({ blob, w: v.videoWidth, h: v.videoHeight, duration: v.duration || 0 });
+      URL.revokeObjectURL(v.src);
+    };
+    v.onloadedmetadata = () => { v.currentTime = Math.min(0.3, (v.duration || 1) * 0.1); };
+    v.onseeked = () => {
+      try {
+        const scale = Math.min(1, 512 / Math.max(v.videoWidth, v.videoHeight));
+        const c = document.createElement('canvas');
+        c.width = Math.round(v.videoWidth * scale);
+        c.height = Math.round(v.videoHeight * scale);
+        c.getContext('2d').drawImage(v, 0, 0, c.width, c.height);
+        c.toBlob((b) => finish(b), 'image/jpeg', 0.78);
+      } catch (e) { finish(null); }
+    };
+    v.onerror = () => finish(null);
+    setTimeout(() => finish(null), 8000);
+  });
+}
+
+// ---------- 列表渲染 ----------
+function addFile(file) {
+  const isVideo = file.type.startsWith('video/');
+  const item = {
+    file, kind: isVideo ? 'video' : 'image', selected: false,
+    thumb: null, duration: 0, w: 0, h: 0, prog: 0, status: '',
+  };
+  files.push(item);
+  const el = document.createElement('div');
+  el.className = 'cell';
+  el.innerHTML = `<img alt=""><div class="tag"></div><div class="chk">✓</div><div class="st"><i></i></div>`;
+  el.querySelector('.tag').textContent = fmt(file.size);
+  el.onclick = () => {
+    item.selected = !item.selected;
+    el.classList.toggle('sel', item.selected);
+    updateSum();
+  };
+  item.el = el;
+  $('grid').appendChild(el);
+  render();
+
+  (async () => {
+    try {
+      if (isVideo) {
+        const r = await makeVideoThumb(file);
+        item.thumb = r.blob; item.duration = r.duration; item.w = r.w; item.h = r.h;
+      } else {
+        const r = await makeImageThumb(file);
+        item.thumb = r.blob; item.w = r.w; item.h = r.h;
+      }
+      if (item.thumb) el.querySelector('img').src = URL.createObjectURL(item.thumb);
+      el.querySelector('.tag').textContent =
+        (isVideo ? (Math.floor(item.duration / 60) + ':' + String(Math.floor(item.duration % 60)).padStart(2, '0') + ' · ') : '') + fmt(file.size);
+    } catch (e) {
+      el.classList.add('err');
+      el.querySelector('.tag').textContent = '无法预览';
+    }
+  })();
+}
+
+function render() {
+  const n = files.length, s = files.filter((f) => f.selected).length;
+  $('cnt').textContent = n ? `${n} 个文件,已选 ${s} 个` : '还没有选择文件';
+  updateSum();
+}
+
+function updateSum() {
+  const sel = files.filter((f) => f.selected);
+  const bytes = sel.reduce((a, f) => a + f.file.size, 0);
+  $('sum').innerHTML = `已选 <b>${sel.length}</b> 个 · ${(bytes / 1048576).toFixed(1)} MB`;
+  $('btnUp').disabled = sel.length === 0 || uploading;
+  const all = files.length && sel.length === files.length;
+  $('btnAll').textContent = all ? '取消全选' : '全选';
+  $('cnt').textContent = files.length ? `${files.length} 个文件,已选 ${sel.length} 个` : '还没有选择文件';
+}
+
+$('fileImages').addEventListener('change', (e) => {
+  for (const f of e.target.files) addFile(f);
+  e.target.value = '';
+  render();
+});
+$('btnClear').onclick = () => {
+  if (uploading) return;
+  files.length = 0; $('grid').innerHTML = ''; render();
+};
+$('btnAll').onclick = () => {
+  const all = files.length && files.every((f) => f.selected);
+  files.forEach((f) => { f.selected = !all; f.el.classList.toggle('sel', f.selected); });
+  updateSum();
+};
+$('btnNone').onclick = () => {
+  files.forEach((f) => { f.selected = false; f.el.classList.remove('sel'); });
+  updateSum();
+};
+
+// ---------- 上传 ----------
+let uploading = false;
+
+async function uploadOne(item) {
+  const fd = new FormData();
+  fd.append('file', item.file, item.file.name);
+  if (item.thumb) fd.append('thumb', item.thumb, 'thumb.jpg');
+  fd.append('meta', JSON.stringify({
+    duration: item.duration, width: item.w, height: item.h,
+    takenAt: item.file.lastModified ? new Date(item.file.lastModified).toISOString() : null,
+  }));
+
+  await new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open('POST', '/api/upload');
+    xhr.setRequestHeader('x-token', token);
+    xhr.upload.onprogress = (e) => {
+      if (e.lengthComputable) {
+        item.prog = e.loaded / e.total;
+        item.el.querySelector('.st i').style.width = (item.prog * 100).toFixed(0) + '%';
+      }
+    };
+    xhr.onload = () => {
+      if (xhr.status >= 200 && xhr.status < 300) {
+        item.prog = 1;
+        item.el.querySelector('.st i').style.width = '100%';
+        item.el.querySelector('.chk').textContent = '✓';
+        resolve();
+      } else {
+        let m = 'HTTP ' + xhr.status;
+        try { m = JSON.parse(xhr.responseText).error || m; } catch (e) {}
+        reject(new Error(m));
+      }
+    };
+    xhr.onerror = () => reject(new Error('网络中断'));
+    xhr.send(fd);
+  });
+}
+
+$('btnUp').onclick = async () => {
+  const todo = files.filter((f) => f.selected && f.prog < 1);
+  if (!todo.length) return;
+  uploading = true; updateSum();
+  $('btnUp').textContent = '上传中…';
+  let ok = 0, fail = 0;
+  const queue = todo.slice();
+  const worker = async () => {
+    while (queue.length) {
+      const it = queue.shift();
+      try { await uploadOne(it); ok++; }
+      catch (e) { fail++; it.el.classList.add('err'); it.el.querySelector('.tag').textContent = e.message; }
+    }
+  };
+  await Promise.all([worker(), worker()]);   // 并发 2,弱网也稳
+  uploading = false;
+  $('btnUp').textContent = '上传';
+  $('cnt').textContent = `完成:成功 ${ok} 个` + (fail ? `,失败 ${fail} 个` : '');
+  updateSum();
+};
+</script>
+</body>
+</html>

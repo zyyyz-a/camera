@@ -8,3 +8,7 @@ apktool.jar
 *.aligned.apk
 *.idsig
 *.keystore
+
+server/node_modules/
+server/data/
+
